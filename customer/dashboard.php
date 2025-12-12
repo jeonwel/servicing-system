@@ -9,25 +9,39 @@ if(!isLoggedIn() || !isCustomer()) {
 
 $user_id = $_SESSION['user_id'];
 
-// Get user info
-$user_sql = "SELECT * FROM users WHERE user_id='$user_id'";
-$user_result = mysqli_query($conn, $user_sql);
+// Get user info using prepared statement
+$user_sql = "SELECT * FROM users WHERE user_id = ?";
+$user_result = executeQuery($conn, $user_sql, [$user_id], "i");
 $user = mysqli_fetch_assoc($user_result);
 
-// Get ticket counts
+// Get ticket counts using prepared statements
 $pending_sql = "SELECT COUNT(*) as count FROM service_requests 
-                WHERE customer_id='$user_id' AND status IN ('pending', 'assigned', 'in_progress')";
-$pending_result = mysqli_query($conn, $pending_sql);
+                WHERE customer_id = ? AND status IN ('pending', 'assigned', 'in_progress')";
+$pending_result = executeQuery($conn, $pending_sql, [$user_id], "i");
 $pending_count = mysqli_fetch_assoc($pending_result)['count'];
 
 $completed_sql = "SELECT COUNT(*) as count FROM service_requests 
-                  WHERE customer_id='$user_id' AND status='completed'";
-$completed_result = mysqli_query($conn, $completed_sql);
+                  WHERE customer_id = ? AND status = 'completed'";
+$completed_result = executeQuery($conn, $completed_sql, [$user_id], "i");
 $completed_count = mysqli_fetch_assoc($completed_result)['count'];
 
-$total_sql = "SELECT COUNT(*) as count FROM service_requests WHERE customer_id='$user_id'";
-$total_result = mysqli_query($conn, $total_sql);
+$total_sql = "SELECT COUNT(*) as count FROM service_requests WHERE customer_id = ?";
+$total_result = executeQuery($conn, $total_sql, [$user_id], "i");
 $total_count = mysqli_fetch_assoc($total_result)['count'];
+
+// Get networking services count
+$services_sql = "SELECT COUNT(*) as count FROM services WHERE status = 'available'";
+$services_result = executeQuery($conn, $services_sql);
+$services_count = mysqli_fetch_assoc($services_result)['count'];
+
+// Get recent activity using prepared statement
+$recent_sql = "SELECT sr.*, s.service_name, tn.ticket_code 
+               FROM service_requests sr 
+               JOIN services s ON sr.service_id = s.service_id 
+               LEFT JOIN ticket_numbers tn ON sr.request_id = tn.request_id
+               WHERE sr.customer_id = ? 
+               ORDER BY sr.request_date DESC LIMIT 8";
+$recent_result = executeQuery($conn, $recent_sql, [$user_id], "i");
 ?>
 
 <!DOCTYPE html>
@@ -52,12 +66,12 @@ $total_count = mysqli_fetch_assoc($total_result)['count'];
         body {
             font-family: "Science Gothic", sans-serif;
             background: linear-gradient(135deg, #0a0a2a 0%, #1a1a3a 100%);
+            background-color: black;
             color: #fff;
             min-height: 100vh;
             background-image: 
                 radial-gradient(circle at 10% 20%, rgba(80, 208, 224, 0.1) 0%, transparent 20%),
                 radial-gradient(circle at 90% 80%, rgba(80, 208, 224, 0.1) 0%, transparent 20%);
-                background-color: black;
         }
 
         .container {
@@ -96,18 +110,6 @@ $total_count = mysqli_fetch_assoc($total_result)['count'];
             width: auto;
         }
 
-        .brand-text h1 {
-            font-size: 1.8rem;
-            color: #50d0e0;
-            margin-bottom: 5px;
-        }
-
-        .brand-text .tagline {
-            font-size: 0.9rem;
-            color: #aee2ff;
-            font-style: italic;
-        }
-
         .nav-menu {
             display: flex;
             gap: 25px;
@@ -125,12 +127,10 @@ $total_count = mysqli_fetch_assoc($total_result)['count'];
         }
 
         .nav-menu a:hover {
-            background: rgba(80, 208, 224, 0.2);
             color: #50d0e0;
         }
 
         .nav-menu a.active {
-            background: rgba(80, 208, 224, 0.3);
             color: #50d0e0;
         }
 
@@ -179,6 +179,7 @@ $total_count = mysqli_fetch_assoc($total_result)['count'];
         main {
             padding-top: 100px;
             min-height: calc(100vh - 200px);
+            background-color: black;
         }
 
         .dashboard-header {
@@ -194,6 +195,17 @@ $total_count = mysqli_fetch_assoc($total_result)['count'];
         .welcome-subtitle {
             color: #aee2ff;
             font-size: 1.1rem;
+            line-height: 1.6;
+        }
+
+        .network-focus-badge {
+            display: inline-block;
+            background: linear-gradient(45deg, #50d0e0, #2196F3);
+            color: white;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            margin-top: 15px;
         }
 
         /* Dashboard Cards Grid */
@@ -212,6 +224,18 @@ $total_count = mysqli_fetch_assoc($total_result)['count'];
             transition: all 0.3s ease;
             backdrop-filter: blur(10px);
             text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .dashboard-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #50d0e0, #2196F3);
         }
 
         .dashboard-card:hover {
@@ -274,6 +298,94 @@ $total_count = mysqli_fetch_assoc($total_result)['count'];
 
         .btn-secondary:hover {
             background: rgba(80, 208, 224, 0.1);
+        }
+
+        /* Services Overview */
+        .services-overview {
+            margin: 50px 0;
+        }
+
+        .services-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 25px;
+            margin-top: 30px;
+        }
+
+        .service-item {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 25px;
+            border: 1px solid rgba(80, 208, 224, 0.2);
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+        }
+
+        .service-item:hover {
+            border-color: #50d0e0;
+            transform: translateY(-3px);
+        }
+
+        .service-item-header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        .service-icon {
+            width: 50px;
+            height: 50px;
+            background: rgba(80, 208, 224, 0.1);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            color: #50d0e0;
+        }
+
+        .service-item-title {
+            font-size: 1.3rem;
+            color: #fff;
+            margin: 0;
+        }
+
+        .service-category {
+            display: inline-block;
+            background: rgba(80, 208, 224, 0.1);
+            color: #50d0e0;
+            padding: 4px 12px;
+            border-radius: 15px;
+            font-size: 0.85rem;
+            margin-bottom: 10px;
+        }
+
+        .service-description {
+            color: #aee2ff;
+            line-height: 1.6;
+            margin-bottom: 15px;
+        }
+
+        .service-features {
+            list-style: none;
+            padding-left: 0;
+            margin: 15px 0;
+        }
+
+        .service-features li {
+            color: #aee2ff;
+            margin-bottom: 8px;
+            padding-left: 25px;
+            position: relative;
+        }
+
+        .service-features li:before {
+            content: '✓';
+            position: absolute;
+            left: 0;
+            color: #50d0e0;
+            font-weight: bold;
         }
 
         /* Recent Activity Section */
@@ -345,11 +457,6 @@ $total_count = mysqli_fetch_assoc($total_result)['count'];
             text-decoration: underline;
         }
 
-        .amount {
-            color: #4CAF50;
-            font-weight: bold;
-        }
-
         /* Quick Actions */
         .quick-actions {
             margin-top: 50px;
@@ -390,6 +497,63 @@ $total_count = mysqli_fetch_assoc($total_result)['count'];
             color: #aee2ff;
             font-size: 0.9rem;
             margin-bottom: 15px;
+            line-height: 1.5;
+        }
+
+        /* Process Guide */
+        .process-guide {
+            margin-top: 60px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 30px;
+            border: 1px solid rgba(80, 208, 224, 0.2);
+            backdrop-filter: blur(10px);
+        }
+
+        .process-steps {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 30px;
+            margin-top: 30px;
+        }
+
+        .process-step {
+            text-align: center;
+            position: relative;
+        }
+
+        .process-step:not(:last-child):after {
+            content: '→';
+            position: absolute;
+            right: -15px;
+            top: 30px;
+            color: #50d0e0;
+            font-size: 1.5rem;
+        }
+
+        .step-number {
+            width: 50px;
+            height: 50px;
+            background: #50d0e0;
+            color: #1b1a1a;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.3rem;
+            font-weight: bold;
+            margin: 0 auto 15px;
+        }
+
+        .step-title {
+            font-size: 1.1rem;
+            color: #fff;
+            margin-bottom: 10px;
+        }
+
+        .step-description {
+            color: #aee2ff;
+            font-size: 0.9rem;
             line-height: 1.5;
         }
 
@@ -443,6 +607,14 @@ $total_count = mysqli_fetch_assoc($total_result)['count'];
             .dashboard-grid {
                 grid-template-columns: repeat(2, 1fr);
             }
+            
+            .process-step:not(:last-child):after {
+                display: none;
+            }
+            
+            .process-steps {
+                grid-template-columns: repeat(2, 1fr);
+            }
         }
 
         @media (max-width: 768px) {
@@ -464,6 +636,10 @@ $total_count = mysqli_fetch_assoc($total_result)['count'];
                 grid-template-columns: 1fr;
             }
             
+            .services-list {
+                grid-template-columns: 1fr;
+            }
+            
             .activity-table {
                 display: block;
                 overflow-x: auto;
@@ -472,6 +648,10 @@ $total_count = mysqli_fetch_assoc($total_result)['count'];
             .welcome-message {
                 font-size: 1.8rem;
             }
+            
+            .process-steps {
+                grid-template-columns: 1fr;
+            }
         }
 
         @media (max-width: 480px) {
@@ -479,7 +659,7 @@ $total_count = mysqli_fetch_assoc($total_result)['count'];
                 padding: 0 15px;
             }
             
-            .dashboard-card, .action-card {
+            .dashboard-card, .action-card, .service-item {
                 padding: 20px;
             }
             
@@ -548,7 +728,7 @@ $total_count = mysqli_fetch_assoc($total_result)['count'];
                     <ul class="nav-menu">
                         <li><a href="../index.php">Home</a></li>
                         <li><a href="dashboard.php" class="active">Dashboard</a></li>
-                        <li><a href="book-service.php">Hire Service</a></li>
+                        <li><a href="book-service.php">Request Service</a></li>
                         <li><a href="tickets.php">My Tickets</a></li>
                         <li><a href="profile.php">Profile</a></li>
                     </ul>
@@ -576,48 +756,126 @@ $total_count = mysqli_fetch_assoc($total_result)['count'];
         <div class="container">
             <!-- Dashboard Header -->
             <div class="dashboard-header">
-                <h1 class="welcome-message">Welcome back, <?php echo $_SESSION['full_name']; ?>! 👋</h1>
-                <p class="welcome-subtitle">Manage your services, track requests, and hire professionals</p>
+                <h1 class="welcome-message">Welcome back, <?php echo $_SESSION['full_name']; ?>! 👨‍💻</h1>
+                <p class="welcome-subtitle">
+                    Manage your networking service requests, track technical issues, and get professional IT support.
+                    <span class="network-focus-badge">Networking & Computer Solutions</span>
+                </p>
             </div>
 
             <!-- Dashboard Stats Cards -->
             <div class="dashboard-grid">
                 <div class="dashboard-card animate-fade-in-up" style="animation-delay: 0.1s;">
                     <span class="card-icon">🔄</span>
-                    <h3 class="card-title">Active Tickets</h3>
+                    <h3 class="card-title">Active Technical Issues</h3>
                     <div class="card-count"><?php echo $pending_count; ?></div>
-                    <p>Services in progress</p>
+                    <p>Networking/Computer issues in progress</p>
                     <div class="card-action">
-                        <a href="tickets.php" class="btn btn-primary">View All</a>
+                        <a href="tickets.php" class="btn btn-primary">View All Issues</a>
                     </div>
                 </div>
                 
                 <div class="dashboard-card animate-fade-in-up" style="animation-delay: 0.2s;">
                     <span class="card-icon">✅</span>
-                    <h3 class="card-title">Completed</h3>
+                    <h3 class="card-title">Resolved Issues</h3>
                     <div class="card-count"><?php echo $completed_count; ?></div>
-                    <p>Finished services</p>
+                    <p>Completed networking services</p>
                     <div class="card-action">
                         <a href="tickets.php?status=completed" class="btn btn-secondary">View History</a>
                     </div>
                 </div>
                 
                 <div class="dashboard-card animate-fade-in-up" style="animation-delay: 0.3s;">
-                    <span class="card-icon">📊</span>
-                    <h3 class="card-title">Total Services</h3>
-                    <div class="card-count"><?php echo $total_count; ?></div>
-                    <p>All your bookings</p>
+                    <span class="card-icon">💻</span>
+                    <h3 class="card-title">Available Services</h3>
+                    <div class="card-count"><?php echo $services_count; ?></div>
+                    <p>Networking & IT solutions</p>
                     <div class="card-action">
-                        <a href="tickets.php" class="btn btn-secondary">See All</a>
+                        <a href="book-service.php" class="btn btn-primary">View Services</a>
                     </div>
                 </div>
                 
                 <div class="dashboard-card animate-fade-in-up" style="animation-delay: 0.4s;">
-                    <span class="card-icon">👨‍🔧</span>
-                    <h3 class="card-title">Hire Service</h3>
-                    <p>Need professional help?</p>
+                    <span class="card-icon">🔧</span>
+                    <h3 class="card-title">Request Support</h3>
+                    <p>Need networking or computer help?</p>
                     <div class="card-action" style="margin-top: 30px;">
-                        <a href="book-service.php" class="btn btn-primary">Book Now</a>
+                        <a href="book-service.php" class="btn btn-primary">Request Service</a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Services Overview -->
+            <div class="services-overview">
+                <h2 class="section-title">Our Networking Services</h2>
+                <p style="color: #aee2ff; margin-bottom: 30px; font-size: 1.1rem;">
+                    We specialize in networking and computer solutions. Describe your issue in detail for better service preparation.
+                </p>
+                
+                <div class="services-list">
+                    <!-- Service 1: Computer Diagnostic & Repair -->
+                    <div class="service-item animate-fade-in-up" style="animation-delay: 0.1s;">
+                        <div class="service-item-header">
+                            <div class="service-icon">💻</div>
+                            <h3 class="service-item-title">Computer Diagnostic & Repair</h3>
+                        </div>
+                        <span class="service-category">Hardware/Software</span>
+                        <p class="service-description">
+                            Complete computer troubleshooting including hardware diagnostics, software issues, 
+                            virus removal, and system optimization.
+                        </p>
+                        <ul class="service-features">
+                            <li>Hardware testing & diagnostics</li>
+                            <li>Software troubleshooting</li>
+                            <li>Virus & malware removal</li>
+                            <li>System optimization</li>
+                        </ul>
+                        <a href="book-service.php" class="btn btn-primary" style="width: 100%; margin-top: 15px;">
+                            Request This Service
+                        </a>
+                    </div>
+                    
+                    <!-- Service 2: Basic Network Configuration -->
+                    <div class="service-item animate-fade-in-up" style="animation-delay: 0.2s;">
+                        <div class="service-item-header">
+                            <div class="service-icon">🌐</div>
+                            <h3 class="service-item-title">Basic Network Configuration</h3>
+                        </div>
+                        <span class="service-category">Networking</span>
+                        <p class="service-description">
+                            Router setup, WiFi configuration, network security setup, and basic LAN troubleshooting.
+                        </p>
+                        <ul class="service-features">
+                            <li>Router setup & configuration</li>
+                            <li>WiFi optimization</li>
+                            <li>Network security setup</li>
+                            <li>LAN troubleshooting</li>
+                        </ul>
+                        <a href="book-service.php" class="btn btn-primary" style="width: 100%; margin-top: 15px;">
+                            Request This Service
+                        </a>
+                    </div>
+                    
+                    <!-- Service 3: IT Consultation & Troubleshooting -->
+                    <div class="service-item animate-fade-in-up" style="animation-delay: 0.3s;">
+                        <div class="service-item-header">
+                            <div class="service-icon">🔍</div>
+                            <h3 class="service-item-title">IT Consultation & Troubleshooting</h3>
+                        </div>
+                        <span class="service-category">Consultation</span>
+                        <p class="service-description">
+                            Expert advice and troubleshooting for specific IT issues, problem diagnosis, 
+                            and solution recommendations.
+                        </p>
+                        <ul class="service-features">
+                            <li>Problem diagnosis</li>
+                            <li>Solution recommendations</li>
+                            <li>Technical advice</li>
+                            <li>Best practices guidance</li>
+                        </ul>
+                        <a href="book-service.php" class="btn btn-primary" style="width: 100%; margin-top: 15px;">
+                            Request Consultation
+                        </a>
                     </div>
                 </div>
             </div>
@@ -625,6 +883,9 @@ $total_count = mysqli_fetch_assoc($total_result)['count'];
             <!-- Recent Activity -->
             <div class="recent-activity">
                 <h2 class="section-title">Recent Service Requests</h2>
+                <p style="color: #aee2ff; margin-bottom: 20px; font-size: 1.1rem;">
+                    Track your networking and computer service tickets
+                </p>
                 
                 <?php
                 $recent_sql = "SELECT sr.*, s.service_name, tn.ticket_code 
@@ -643,7 +904,7 @@ $total_count = mysqli_fetch_assoc($total_result)['count'];
                                     <th>Ticket #</th>
                                     <th>Service</th>
                                     <th>Date</th>
-                                    <th>Amount</th>
+                                    <th>Issue Type</th>
                                     <th>Status</th>
                                     <th>Action</th>
                                 </tr>
@@ -653,10 +914,10 @@ $total_count = mysqli_fetch_assoc($total_result)['count'];
                                     $status_class = str_replace('_', '-', $row['status']);
                                     ?>
                                     <tr>
-                                        <td><strong><?php echo $row['ticket_code'] ?? 'N/A'; ?></strong></td>
-                                        <td><?php echo $row['service_name']; ?></td>
+                                        <td><strong><?php echo htmlspecialchars($row['ticket_code'] ?? 'N/A'); ?></strong></td>
+                                        <td><?php echo htmlspecialchars($row['service_name']); ?></td>
                                         <td><?php echo date('M d, Y', strtotime($row['request_date'])); ?></td>
-                                        <td class="amount">₱<?php echo $row['total_amount']; ?></td>
+                                        <td><?php echo htmlspecialchars($row['category'] ?? 'Networking'); ?></td>
                                         <td>
                                             <span class="status-badge status-<?php echo $row['status']; ?>">
                                                 <?php echo ucfirst(str_replace('_', ' ', $row['status'])); ?>
@@ -671,52 +932,69 @@ $total_count = mysqli_fetch_assoc($total_result)['count'];
                             </tbody>
                         </table>
                     </div>
-                    
-                    <div style="text-align: center; margin-top: 30px;">
-                        <a href="tickets.php" class="btn btn-primary">View All Tickets</a>
-                    </div>
-                    
-                <?php else: ?>
-                    <div class="empty-state">
-                        <div class="empty-state-icon">📭</div>
-                        <h3 class="empty-state-title">No Service Requests Yet</h3>
-                        <p class="empty-state-description">
-                            You haven't booked any services yet. Start by hiring a professional 
-                            for your needs.
-                        </p>
-                        <a href="book-service.php" class="btn btn-primary">Hire Your First Service</a>
-                    </div>
                 <?php endif; ?>
+            </div>
+
+            <!-- Process Guide -->
+            <div class="process-guide">
+                <h2 class="section-title" style="border-bottom: none; margin-bottom: 10px;">How Our Service Works</h2>
+                <p style="color: #aee2ff; margin-bottom: 30px;">Efficient networking support process</p>
+                
+                <div class="process-steps">
+                    <div class="process-step">
+                        <div class="step-number">1</div>
+                        <h3 class="step-title">Describe Issue</h3>
+                        <p class="step-description">Provide detailed description of your networking or computer problem</p>
+                    </div>
+                    
+                    <div class="process-step">
+                        <div class="step-number">2</div>
+                        <h3 class="step-title">Technician Review</h3>
+                        <p class="step-description">Our networking expert reviews your specific issue</p>
+                    </div>
+                    
+                    <div class="process-step">
+                        <div class="step-number">3</div>
+                        <h3 class="step-title">Service Preparation</h3>
+                        <p class="step-description">Technician prepares tools & solutions based on your issue</p>
+                    </div>
+                    
+                    <div class="process-step">
+                        <div class="step-number">4</div>
+                        <h3 class="step-title">Issue Resolution</h3>
+                        <p class="step-description">Expert service delivery with prepared solutions</p>
+                    </div>
+                </div>
             </div>
 
             <!-- Quick Actions -->
             <div class="quick-actions">
                 <div class="action-card animate-fade-in-up" style="animation-delay: 0.1s;">
                     <span class="action-icon">📝</span>
-                    <h4 class="action-title">Edit Profile</h4>
-                    <p class="action-description">Update your personal information and contact details</p>
-                    <a href="profile.php" class="btn btn-secondary">Go to Profile</a>
+                    <h4 class="action-title">Update Profile</h4>
+                    <p class="action-description">Keep your contact information updated for better service</p>
+                    <a href="profile.php" class="btn btn-secondary" style="margin-top: 10px;">Edit Profile</a>
                 </div>
                 
                 <div class="action-card animate-fade-in-up" style="animation-delay: 0.2s;">
                     <span class="action-icon">🔧</span>
                     <h4 class="action-title">Browse Services</h4>
-                    <p class="action-description">Explore all available professional services</p>
-                    <a href="../index.php#services" class="btn btn-secondary">View Services</a>
+                    <p class="action-description">View all available networking and computer services</p>
+                    <a href="../index.php#services" class="btn btn-secondary" style="margin-top: 10px;">View Services</a>
                 </div>
                 
                 <div class="action-card animate-fade-in-up" style="animation-delay: 0.3s;">
                     <span class="action-icon">📋</span>
-                    <h4 class="action-title">Create Ticket</h4>
-                    <p class="action-description">Submit a new service request</p>
-                    <a href="book-service.php" class="btn btn-primary">New Request</a>
+                    <h4 class="action-title">New Service Request</h4>
+                    <p class="action-description">Submit detailed description of your technical issue</p>
+                    <a href="book-service.php" class="btn btn-primary" style="margin-top: 10px;">Request Service</a>
                 </div>
                 
                 <div class="action-card animate-fade-in-up" style="animation-delay: 0.4s;">
                     <span class="action-icon">📞</span>
-                    <h4 class="action-title">Need Help?</h4>
-                    <p class="action-description">Contact our support team for assistance</p>
-                    <a href="../index.php#contact" class="btn btn-secondary">Contact Us</a>
+                    <h4 class="action-title">Tech Support</h4>
+                    <p class="action-description">Contact our networking specialists for assistance</p>
+                    <a href="../index.php#contact" class="btn btn-secondary" style="margin-top: 10px;">Contact Support</a>
                 </div>
             </div>
         </div>
@@ -728,35 +1006,33 @@ $total_count = mysqli_fetch_assoc($total_result)['count'];
             <div class="footer-content">
                 <div class="footer-section">
                     <h3>DRAD Servicing</h3>
-                    <p>Your trusted partner for professional services. Hire skilled professionals, succeed with quality results, and repeat with confidence.</p>
-                    <p class="tagline" style="color: #50d0e0; margin-top: 10px;">Hire, Succeed, Repeat.</p>
+                    <p>Specialized networking and computer repair services. Describe your issue, get prepared technicians, and experience efficient IT solutions.</p>
+                    <p class="tagline" style="color: #50d0e0; margin-top: 10px;">Networking Solutions - Hire, Succeed, Repeat</p>
                 </div>
                 
                 <div class="footer-section">
                     <h3>Customer Menu</h3>
                     <a href="dashboard.php">Dashboard</a>
-                    <a href="book-service.php">Hire Service</a>
+                    <a href="book-service.php">Request Service</a>
                     <a href="tickets.php">My Tickets</a>
                     <a href="profile.php">My Profile</a>
                     <a href="../logout.php">Logout</a>
                 </div>
                 
                 <div class="footer-section">
-                    <h3>Quick Links</h3>
-                    <a href="../index.php">Home</a>
-                    <a href="../index.php#services">Services</a>
-                    <a href="../index.php#how-it-works">How It Works</a>
-                    <a href="../index.php#features">Why Choose Us</a>
-                    <a href="../index.php#contact">Contact</a>
+                    <h3>Technical Services</h3>
+                    <a href="../index.php#services">Computer Diagnostic & Repair</a>
+                    <a href="../index.php#services">Basic Network Configuration</a>
+                    <a href="../index.php#services">IT Consultation</a>
                 </div>
                 
                 <div class="footer-section">
-                    <h3>Support</h3>
-                    <a href="mailto:support@dradservicing.com">Email Support</a>
+                    <h3>Technical Support</h3>
+                    <a href="mailto:techsupport@dradservicing.com">Email: techsupport@dradservicing.com</a>
                     <a href="tel:+63212345678">Phone: (02) 1234-5678</a>
-                    <a href="#">FAQ</a>
-                    <a href="#">Terms of Service</a>
-                    <a href="#">Privacy Policy</a>
+                    <a href="#">Service Hours</a>
+                    <a href="#">Technical FAQ</a>
+                    <a href="#">Service Area</a>
                 </div>
             </div>
             
@@ -771,7 +1047,7 @@ $total_count = mysqli_fetch_assoc($total_result)['count'];
         // Smooth animations
         document.addEventListener('DOMContentLoaded', function() {
             // Add animation classes
-            const cards = document.querySelectorAll('.dashboard-card, .action-card');
+            const cards = document.querySelectorAll('.dashboard-card, .action-card, .service-item');
             cards.forEach((card, index) => {
                 card.style.animationDelay = `${(index + 1) * 0.1}s`;
             });

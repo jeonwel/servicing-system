@@ -21,16 +21,19 @@ if($_SERVER['REQUEST_METHOD'] == 'POST') {
     
     // Check if input is email or username
     if(filter_var($login_input, FILTER_VALIDATE_EMAIL)) {
-        // Input is email
-        $sql = "SELECT * FROM users WHERE email='$login_input' AND status='active'";
+        // Input is email - use prepared statement
+        $sql = "SELECT * FROM users WHERE email=? AND status='active'";
+        $param_type = "s";
     } else {
-        // Input is username
-        $sql = "SELECT * FROM users WHERE username='$login_input' AND status='active'";
+        // Input is username - use prepared statement
+        $sql = "SELECT * FROM users WHERE username=? AND status='active'";
+        $param_type = "s";
     }
     
-    $result = mysqli_query($conn, $sql);
+    // Use prepared statement with your executeQuery function
+    $result = executeQuery($conn, $sql, [$login_input], $param_type);
     
-    if(mysqli_num_rows($result) == 1) {
+    if($result && mysqli_num_rows($result) == 1) {
         $user = mysqli_fetch_assoc($result);
         
         if(password_verify($password, $user['password'])) {

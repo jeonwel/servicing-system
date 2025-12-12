@@ -6,7 +6,7 @@ session_start();
 define('DB_HOST', 'localhost');
 define('DB_USER', 'root');
 define('DB_PASS', ''); // Default XAMPP password is empty
-define('DB_NAME', 'servicing_system');
+define('DB_NAME', 'drad_servicing');
 
 // Create connection
 $conn = mysqli_connect(DB_HOST, DB_USER, DB_PASS, DB_NAME);

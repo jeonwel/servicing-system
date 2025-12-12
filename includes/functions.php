@@ -48,4 +48,73 @@ function showAlert() {
         unset($_SESSION['error']);
     }
 }
+
+function executeQuery($conn, $sql, $params = [], $types = "") {
+    $stmt = mysqli_prepare($conn, $sql);
+    if (!$stmt) {
+        error_log("SQL Prepare Error: " . mysqli_error($conn));
+        return false;
+    }
+    
+    if (!empty($params)) {
+        mysqli_stmt_bind_param($stmt, $types, ...$params);
+    }
+    
+    if (!mysqli_stmt_execute($stmt)) {
+        error_log("SQL Execute Error: " . mysqli_stmt_error($stmt));
+        mysqli_stmt_close($stmt);
+        return false;
+    }
+    
+    $result = mysqli_stmt_get_result($stmt);
+    mysqli_stmt_close($stmt);
+    
+    return $result;
+}
+
+// For UPDATE, INSERT, DELETE queries (returns true/false)
+function executeUpdate($conn, $sql, $params = [], $types = "") {
+    $stmt = mysqli_prepare($conn, $sql);
+    if (!$stmt) {
+        error_log("SQL Prepare Error: " . mysqli_error($conn));
+        return false;
+    }
+    
+    if (!empty($params)) {
+        mysqli_stmt_bind_param($stmt, $types, ...$params);
+    }
+    
+    $success = mysqli_stmt_execute($stmt);
+    
+    if (!$success) {
+        error_log("SQL Execute Error: " . mysqli_stmt_error($stmt));
+    }
+    
+    mysqli_stmt_close($stmt);
+    
+    return $success;
+}
+
+function executeInsert($conn, $sql, $params = [], $types = "") {
+    $stmt = mysqli_prepare($conn, $sql);
+    if (!$stmt) {
+        error_log("SQL Prepare Error: " . mysqli_error($conn));
+        return false;
+    }
+    
+    if (!empty($params)) {
+        mysqli_stmt_bind_param($stmt, $types, ...$params);
+    }
+    
+    if (!mysqli_stmt_execute($stmt)) {
+        error_log("SQL Execute Error: " . mysqli_stmt_error($stmt));
+        mysqli_stmt_close($stmt);
+        return false;
+    }
+    
+    $insert_id = mysqli_stmt_insert_id($stmt);
+    mysqli_stmt_close($stmt);
+    
+    return $insert_id;
+}
 ?>
